@@ -1,190 +1,203 @@
 <!DOCTYPE html>
-<html lang="en">
-	<head>
-		<title>three.js webgl - interactive - voxel painter (mobile safe)</title>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-		<style>
-			html, body { margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; background-color: #87CEEB; color: #444; font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif; touch-action: none; }
-			a { color: #08f; }
-			#info { position: absolute; top: 0px; width: 100%; padding: 10px; box-sizing: border-box; text-align: center; font-size: 13px; z-index: 20; pointer-events: none; color: #333; }
-			#mobile-ui { display: none; position: fixed; inset: 0; z-index: 30; pointer-events: none; }
-			#mobile-ui.active { display: block; }
-			#crosshair { position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid rgba(255,255,255,0.9); border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.8); pointer-events: none; }
-			#look-zone { position: absolute; top: 0; right: 0; width: 50%; height: 100%; pointer-events: auto; }
-			#joystick-zone { position: absolute; left: 20px; bottom: 20px; width: 140px; height: 140px; border-radius: 50%; background: rgba(0, 0, 0, 0.18); border: 1px solid rgba(255,255,255,0.35); pointer-events: auto; }
-			#action-buttons { position: absolute; right: 18px; bottom: 18px; display: flex; flex-direction: row; align-items: flex-end; gap: 14px; pointer-events: auto; }
-			.action-btn { display: flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.6); background: rgba(40, 40, 40, 0.5); color: #fff; font-size: 11px; font-weight: 600; user-select: none; -webkit-tap-highlight-color: transparent; }
-			.action-btn:active { background: rgba(40, 40, 40, 0.8); transform: scale(0.95); }
-			#btn-place { background: rgba(46, 160, 90, 0.6); }
-			#btn-break { background: rgba(200, 60, 50, 0.6); }
-			#btn-jump { width: 54px; height: 54px; align-self: center; background: rgba(40, 100, 200, 0.6); }
-			#mobile-hint { position: absolute; top: 8px; left: 0; width: 100%; text-align: center; color: rgba(0,0,0,0.7); font-size: 12px; font-weight: bold; pointer-events: none; }
-		</style>
-	</head>
-	<body>
-		<div id="info">Voxel Builder - <span id="desktop-hint"><strong>click</strong>: add, <strong>shift + click</strong>: remove</span></div>
-		<div id="mobile-ui">
-			<div id="mobile-hint">Drag right side to look &middot; Joystick to move</div>
-			<div id="crosshair"></div>
-			<div id="look-zone"></div>
-			<div id="joystick-zone"></div>
-			<div id="action-buttons"><div class="action-btn" id="btn-break">BREAK</div><div class="action-btn" id="btn-jump">JUMP</div><div class="action-btn" id="btn-place">PLACE</div></div>
-		</div>
-		<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
-		<script type="importmap">{"imports": {"three": "https://unpkg.com/three@0.160.0/build/three.module.js"}}</script>
-		<script type="module">
-			import * as THREE from 'three';
-			let camera, scene, renderer, plane, pointer, raycaster, isShiftDown = false;
-			let rollOverMesh, rollOverMaterial, cubeGeo, cubeMaterial;
-			const objects = [];
-			const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-			let joystick = null, moveVector = { x: 0, y: 0 }, moveForce = 0, yaw = 0, pitch = 0;
-			const PITCH_LIMIT = Math.PI / 2 - 0.05;
-			let lookTouchId = null, lastLookX = 0, lastLookY = 0;
-			let isJumping = false, jumpStart = 0, baseCameraY = 0;
-			const JUMP_DURATION = 400, JUMP_HEIGHT = 80, clock = new THREE.Clock(), MOVE_SPEED = 300;
+<html lang="ja">
+<head>
+    <title>Minecraft Mobile</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; touch-action: none; font-family: sans-serif; user-select: none; -webkit-user-select: none; }
+        #mobile-ui { display: none; position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+        #mobile-ui.active { display: block; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; background: white; border-radius: 50%; border: 1px solid black; }
+        #look-zone { position: absolute; top: 0; right: 0; width: 50%; height: 100%; pointer-events: auto; }
+        #joystick-zone { position: absolute; left: 20px; bottom: 20px; width: 120px; height: 120px; pointer-events: auto; }
+        #action-buttons { position: absolute; right: 20px; bottom: 20px; display: flex; gap: 10px; pointer-events: auto; }
+        .btn { width: 60px; height: 60px; border-radius: 50%; background: rgba(0,0,0,0.5); color: white; display: flex; justify-content: center; align-items: center; font-size: 12px; font-weight: bold; border: 2px solid white; cursor: pointer; }
+        #btn-place { background: rgba(46,160,90,0.7); }
+        #btn-break { background: rgba(200,60,50,0.7); }
+        #btn-jump { background: rgba(40,100,200,0.7); height: 50px; align-self: flex-end; }
+        #info { position: absolute; top: 10px; width: 100%; text-align: center; color: #333; font-size: 14px; font-weight: bold; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="info">Minecraft Mobile Clone</div>
+    <div id="mobile-ui">
+        <div id="crosshair"></div>
+        <div id="look-zone"></div>
+        <div id="joystick-zone"></div>
+        <div id="action-buttons">
+            <div class="btn" id="btn-break">壊す</div>
+            <div class="btn" id="btn-jump">ジャンプ</div>
+            <div class="btn" id="btn-place">置く</div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
+    <script type="importmap">{"imports": {"three": "https://unpkg.com/three@0.160.0/build/three.module.js"}}</script>
+    <script type="module">
+        import * as THREE from 'three';
+        
+        let camera, scene, renderer, plane, raycaster, rollOverMesh, cubeGeo, cubeMaterial;
+        const objects = [];
+        const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+        
+        let moveVector = {x:0, y:0}, yaw = 0, pitch = -0.1, lookTouchId = null, lastLookX = 0, lastLookY = 0;
+        let isJumping = false, jumpStart = 0;
+        const clock = new THREE.Clock();
 
-			init();
-			render();
+        init();
 
-			function init() {
-				camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 1, 10000 );
-				if ( isMobile ) {
-					baseCameraY = 150; camera.position.set( 0, baseCameraY, 400 ); camera.rotation.order = 'YXZ';
-					yaw = 0; pitch = -0.1; camera.rotation.y = yaw; camera.rotation.x = pitch;
-				} else { camera.position.set( 500, 800, 1300 ); camera.lookAt( 0, 0, 0 ); }
+        function init() {
+            camera = new THREE.PerspectiveCamera( 50, window.innerWidth/window.innerHeight, 1, 10000 );
+            camera.position.set(0, 150, 400); 
+            camera.rotation.order = 'YXZ';
+            camera.rotation.set(pitch, yaw, 0);
 
-				scene = new THREE.Scene();
-				scene.background = new THREE.Color( 0x87CEEB ); // Sky blue
+            scene = new THREE.Scene(); 
+            scene.background = new THREE.Color(0x87CEEB);
+            
+            const rollOverGeo = new THREE.BoxGeometry(50, 50, 50);
+            rollOverMesh = new THREE.Mesh(rollOverGeo, new THREE.MeshBasicMaterial({color: 0xff0000, opacity: 0.5, transparent: true}));
+            scene.add(rollOverMesh);
 
-				rollOverGeo = new THREE.BoxGeometry( 50, 50, 50 );
-				rollOverMaterial = new THREE.MeshBasicMaterial( { color: 0xff0000, opacity: 0.5, transparent: true } );
-				rollOverMesh = new THREE.Mesh( rollOverGeo, rollOverMaterial );
-				scene.add( rollOverMesh );
+            cubeGeo = new THREE.BoxGeometry(50, 50, 50);
+            cubeMaterial = new THREE.MeshLambertMaterial({color: 0x8fce00}); // Solid green, no texture
+            const edges = new THREE.EdgesGeometry(cubeGeo);
+            const lineMat = new THREE.LineBasicMaterial({color: 0x000000, linewidth: 2});
+            
+            window.createBlock = function() {
+                const g = new THREE.Group();
+                g.add(new THREE.Mesh(cubeGeo, cubeMaterial));
+                g.add(new THREE.LineSegments(edges, lineMat));
+                return g;
+            };
 
-				cubeGeo = new THREE.BoxGeometry( 50, 50, 50 );
-				cubeMaterial = new THREE.MeshLambertMaterial( { color: 0x8fce00 } );
+            scene.add(new THREE.GridHelper(1000, 20));
+            raycaster = new THREE.Raycaster();
+            
+            plane = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000).rotateX(-Math.PI/2), new THREE.MeshBasicMaterial({visible:false}));
+            scene.add(plane); 
+            objects.push(plane);
 
-				const edges = new THREE.EdgesGeometry( cubeGeo );
-				const lineMaterial = new THREE.LineBasicMaterial( { color: 0x000000, linewidth: 2 } );
-				
-				window.createBlock = function() {
-					const group = new THREE.Group();
-					const mesh = new THREE.Mesh( cubeGeo, cubeMaterial );
-					group.add(mesh);
-					const lines = new THREE.LineSegments( edges, lineMaterial );
-					group.add(lines);
-					return group;
-				};
+            scene.add(new THREE.AmbientLight(0x606060));
+            const dirLight = new THREE.DirectionalLight(0xffffff);
+            dirLight.position.set(1, 0.75, 0.5).normalize();
+            scene.add(dirLight);
 
-				const gridHelper = new THREE.GridHelper( 1000, 20 );
-				scene.add( gridHelper );
+            renderer = new THREE.WebGLRenderer({antialias: true});
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
 
-				raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
-				const geometry = new THREE.PlaneGeometry( 1000, 1000 ); geometry.rotateX( - Math.PI / 2 );
-				plane = new THREE.Mesh( geometry, new THREE.MeshBasicMaterial( { visible: false } ) );
-				scene.add( plane ); objects.push( plane );
+            if (isMobile) {
+                document.getElementById('mobile-ui').classList.add('active');
+                setupMobile();
+                renderer.setAnimationLoop(animate);
+            } else {
+                // Desktop fallback controls could go here, but focusing on mobile.
+                 renderer.setAnimationLoop(animate);
+            }
+            
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
 
-				const ambientLight = new THREE.AmbientLight( 0x606060 ); scene.add( ambientLight );
-				const directionalLight = new THREE.DirectionalLight( 0xffffff ); directionalLight.position.set( 1, 0.75, 0.5 ).normalize(); scene.add( directionalLight );
+        function setupMobile() {
+            const joystick = nipplejs.create({zone: document.getElementById('joystick-zone'), mode: 'static', position: {left:'50%', top:'50%'}, color: 'white'});
+            joystick.on('move', (e, data) => { moveVector = data.vector || {x:0, y:0}; });
+            joystick.on('end', () => { moveVector = {x:0, y:0}; });
 
-				renderer = new THREE.WebGLRenderer( { antialias: true } ); renderer.setPixelRatio( window.devicePixelRatio ); renderer.setSize( window.innerWidth, window.innerHeight );
-				document.body.appendChild( renderer.domElement );
+            const lookZone = document.getElementById('look-zone');
+            lookZone.addEventListener('touchstart', e => { 
+                lookTouchId = e.changedTouches[0].identifier; 
+                lastLookX = e.changedTouches[0].clientX; 
+                lastLookY = e.changedTouches[0].clientY; 
+                e.preventDefault(); 
+            }, {passive:false});
+            
+            lookZone.addEventListener('touchmove', e => {
+                for(let t of e.changedTouches) {
+                    if(t.identifier === lookTouchId) {
+                        yaw -= (t.clientX - lastLookX) * 0.004;
+                        pitch = Math.max(-1.5, Math.min(1.5, pitch - (t.clientY - lastLookY) * 0.004));
+                        camera.rotation.set(pitch, yaw, 0);
+                        lastLookX = t.clientX; 
+                        lastLookY = t.clientY;
+                    }
+                }
+                e.preventDefault();
+            }, {passive:false});
+            
+            lookZone.addEventListener('touchend', e => { for(let t of e.changedTouches) if(t.identifier === lookTouchId) lookTouchId = null; });
 
-				if ( isMobile ) {
-					document.getElementById( 'mobile-ui' ).classList.add( 'active' ); document.getElementById( 'desktop-hint' ).style.display = 'none';
-					initMobileControls(); renderer.setAnimationLoop( animate );
-				} else {
-					document.addEventListener( 'pointermove', onPointerMove ); document.addEventListener( 'pointerdown', onPointerDown );
-					document.addEventListener( 'keydown', onDocumentKeyDown ); document.addEventListener( 'keyup', onDocumentKeyUp );
-				}
-				window.addEventListener( 'resize', onWindowResize );
-			}
+            document.getElementById('btn-place').addEventListener('touchstart', e => { 
+                e.preventDefault(); 
+                const i = getIntersect(); 
+                if(i) { 
+                    const v = window.createBlock(); 
+                    v.position.copy(rollOverMesh.position); 
+                    const h = new THREE.Mesh(cubeGeo, new THREE.MeshBasicMaterial({visible:false})); 
+                    v.add(h); 
+                    scene.add(v); 
+                    objects.push(h); 
+                } 
+            }, {passive:false});
+            
+            document.getElementById('btn-break').addEventListener('touchstart', e => { 
+                e.preventDefault(); 
+                raycaster.setFromCamera({x:0,y:0}, camera); 
+                const i = raycaster.intersectObjects(objects); 
+                if(i.length>0 && i[0].object!==plane){ 
+                    scene.remove(i[0].object.parent); 
+                    objects.splice(objects.indexOf(i[0].object),1); 
+                } 
+            }, {passive:false});
+            
+            document.getElementById('btn-jump').addEventListener('touchstart', e => { 
+                e.preventDefault(); 
+                if(!isJumping){ isJumping=true; jumpStart=performance.now(); } 
+            }, {passive:false});
+        }
 
-			function initMobileControls() {
-				const zone = document.getElementById( 'joystick-zone' );
-				joystick = nipplejs.create( { zone: zone, mode: 'static', position: { left: '50%', top: '50%' }, color: 'white', size: 110, restOpacity: 0.9 } );
-				joystick.on( 'move', ( evt, data ) => { if ( ! data.vector ) return; moveVector.x = data.vector.x; moveVector.y = data.vector.y; moveForce = Math.min( data.force || 1, 1.5 ); } );
-				joystick.on( 'end', () => { moveVector.x = 0; moveVector.y = 0; moveForce = 0; } );
+        function getIntersect() {
+            raycaster.setFromCamera({x:0, y:0}, camera);
+            const i = raycaster.intersectObjects(objects);
+            if(i.length > 0) {
+                rollOverMesh.visible = true;
+                rollOverMesh.position.copy(i[0].point).add(i[0].face.normal).divideScalar(50).floor().multiplyScalar(50).addScalar(25);
+                return i[0];
+            }
+            rollOverMesh.visible = false; 
+            return null;
+        }
 
-				const lookZone = document.getElementById( 'look-zone' );
-				lookZone.addEventListener( 'touchstart', ( e ) => { const touch = e.changedTouches[ 0 ]; lookTouchId = touch.identifier; lastLookX = touch.clientX; lastLookY = touch.clientY; e.preventDefault(); }, { passive: false } );
-				lookZone.addEventListener( 'touchmove', ( e ) => {
-					for ( const touch of e.changedTouches ) {
-						if ( touch.identifier !== lookTouchId ) continue;
-						const dx = touch.clientX - lastLookX; const dy = touch.clientY - lastLookY;
-						lastLookX = touch.clientX; lastLookY = touch.clientY;
-						yaw -= dx * 0.0035; pitch -= dy * 0.0035; pitch = Math.max( -PITCH_LIMIT, Math.min( PITCH_LIMIT, pitch ) );
-						camera.rotation.y = yaw; camera.rotation.x = pitch;
-					}
-					e.preventDefault();
-				}, { passive: false } );
-				lookZone.addEventListener( 'touchend', ( e ) => { for ( const touch of e.changedTouches ) { if ( touch.identifier === lookTouchId ) lookTouchId = null; } } );
-				lookZone.addEventListener( 'touchcancel', () => { lookTouchId = null; } );
-
-				document.getElementById( 'btn-place' ).addEventListener( 'touchstart', ( e ) => { e.preventDefault(); e.stopPropagation(); placeVoxelAtCrosshair(); }, { passive: false } );
-				document.getElementById( 'btn-break' ).addEventListener( 'touchstart', ( e ) => { e.preventDefault(); e.stopPropagation(); breakVoxelAtCrosshair(); }, { passive: false } );
-				document.getElementById( 'btn-jump' ).addEventListener( 'touchstart', ( e ) => { e.preventDefault(); e.stopPropagation(); doJump(); }, { passive: false } );
-			}
-
-			function updateCrosshairRaycast() {
-				raycaster.setFromCamera( { x: 0, y: 0 }, camera ); const intersects = raycaster.intersectObjects( objects );
-				if ( intersects.length > 0 ) {
-					const intersect = intersects[ 0 ]; rollOverMesh.visible = true;
-					rollOverMesh.position.copy( intersect.point ).add( intersect.face.normal ); rollOverMesh.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
-					return intersect;
-				}
-				rollOverMesh.visible = false; return null;
-			}
-
-			function placeVoxelAtCrosshair() {
-				const intersect = updateCrosshairRaycast(); if ( ! intersect ) return;
-				const voxelGroup = window.createBlock();
-				voxelGroup.position.copy( intersect.point ).add( intersect.face.normal ); voxelGroup.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
-				const hitMesh = new THREE.Mesh( cubeGeo, new THREE.MeshBasicMaterial({visible:false}) ); voxelGroup.add(hitMesh);
-				scene.add( voxelGroup ); objects.push( hitMesh );
-			}
-
-			function breakVoxelAtCrosshair() {
-				raycaster.setFromCamera( { x: 0, y: 0 }, camera ); const intersects = raycaster.intersectObjects( objects );
-				if ( intersects.length > 0 ) {
-					const intersect = intersects[ 0 ];
-					if ( intersect.object !== plane ) { scene.remove( intersect.object.parent ); objects.splice( objects.indexOf( intersect.object ), 1 ); }
-				}
-			}
-
-			function doJump() { if ( isJumping ) return; isJumping = true; jumpStart = performance.now(); }
-			function updateJump() {
-				if ( ! isJumping ) return; const t = ( performance.now() - jumpStart ) / JUMP_DURATION;
-				if ( t >= 1 ) { isJumping = false; camera.position.y = baseCameraY; return; }
-				camera.position.y = baseCameraY + Math.sin( t * Math.PI ) * JUMP_HEIGHT;
-			}
-
-			function updateMovement( delta ) {
-				if ( moveForce === 0 ) return;
-				const forward = new THREE.Vector3( 0, 0, -1 ).applyEuler( new THREE.Euler( 0, yaw, 0 ) ); const right = new THREE.Vector3( 1, 0, 0 ).applyEuler( new THREE.Euler( 0, yaw, 0 ) );
-				const speed = MOVE_SPEED * moveForce * delta; camera.position.addScaledVector( forward, moveVector.y * speed ); camera.position.addScaledVector( right, moveVector.x * speed );
-			}
-
-			function animate() { const delta = clock.getDelta(); updateMovement( delta ); updateJump(); updateCrosshairRaycast(); renderer.render( scene, camera ); }
-			function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize( window.innerWidth, window.innerHeight ); if(!isMobile) render(); }
-			function onPointerMove( event ) { pointer.set( ( event.clientX / window.innerWidth ) * 2 - 1, - ( event.clientY / window.innerHeight ) * 2 + 1 ); raycaster.setFromCamera( pointer, camera ); const intersects = raycaster.intersectObjects( objects ); if ( intersects.length > 0 ) { const intersect = intersects[ 0 ]; rollOverMesh.position.copy( intersect.point ).add( intersect.face.normal ); rollOverMesh.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 ); } render(); }
-			function onPointerDown( event ) {
-				pointer.set( ( event.clientX / window.innerWidth ) * 2 - 1, - ( event.clientY / window.innerHeight ) * 2 + 1 ); raycaster.setFromCamera( pointer, camera ); const intersects = raycaster.intersectObjects( objects );
-				if ( intersects.length > 0 ) {
-					const intersect = intersects[ 0 ];
-					if ( isShiftDown ) { if ( intersect.object !== plane ) { scene.remove( intersect.object.parent ); objects.splice( objects.indexOf( intersect.object ), 1 ); } }
-					else {
-						const voxelGroup = window.createBlock(); voxelGroup.position.copy( intersect.point ).add( intersect.face.normal ); voxelGroup.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
-						const hitMesh = new THREE.Mesh( cubeGeo, new THREE.MeshBasicMaterial({visible:false}) ); voxelGroup.add(hitMesh); scene.add( voxelGroup ); objects.push( hitMesh );
-					}
-					render();
-				}
-			}
-			function onDocumentKeyDown( event ) { switch ( event.keyCode ) { case 16: isShiftDown = true; break; } }
-			function onDocumentKeyUp( event ) { switch ( event.keyCode ) { case 16: isShiftDown = false; break; } }
-			function render() { renderer.render( scene, camera ); }
-		</script>
-	</body>
+        function animate() {
+            const delta = clock.getDelta();
+            
+            if(moveVector.x !== 0 || moveVector.y !== 0) {
+                const speed = 300 * delta;
+                const forward = new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(0,yaw,0));
+                const right = new THREE.Vector3(1,0,0).applyEuler(new THREE.Euler(0,yaw,0));
+                camera.position.addScaledVector(forward, moveVector.y * speed);
+                camera.position.addScaledVector(right, moveVector.x * speed);
+            }
+            
+            if(isJumping) {
+                const t = (performance.now() - jumpStart) / 400;
+                if(t >= 1) { 
+                    isJumping = false; 
+                    camera.position.y = 150; 
+                } else { 
+                    camera.position.y = 150 + Math.sin(t * Math.PI) * 80; 
+                }
+            }
+            
+            getIntersect();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
 </html>
