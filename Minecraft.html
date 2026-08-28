@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - interactive - voxel painter (mobile)</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+		<style>
+			html, body {
+				margin: 0;
+				padding: 0;
+				overflow: hidden;
+				overscroll-behavior: none;
+				background-color: #f0f0f0;
+				color: #444;
+				font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+				touch-action: none;
+			}
+			a { color: #08f; }
+
+			#info {
+				position: absolute;
+				top: 0px;
+				width: 100%;
+				padding: 10px;
+				box-sizing: border-box;
+				text-align: center;
+				font-size: 13px;
+				z-index: 20;
+				pointer-events: none;
+			}
+
+			/* ---------- Mobile HUD ---------- */
+
+			#mobile-ui {
+				display: none;
+				position: fixed;
+				inset: 0;
+				z-index: 30;
+				pointer-events: none;
+			}
+
+			#mobile-ui.active {
+				display: block;
+			}
+
+			/* crosshair reticle, center screen */
+			#crosshair {
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				width: 14px;
+				height: 14px;
+				margin: -7px 0 0 -7px;
+				border: 2px solid rgba(255,255,255,0.85);
+				border-radius: 50%;
+				box-shadow: 0 0 4px rgba(0,0,0,0.6);
+				pointer-events: none;
+			}
+
+			/* left half of screen = look/rotate zone marker (invisible, just for touch handling) */
+			#look-zone {
+				position: absolute;
+				top: 0;
+				right: 0;
+				width: 50%;
+				height: 100%;
+				pointer-events: auto;
+			}
+
+			/* joystick zone, bottom-left */
+			#joystick-zone {
+				position: absolute;
+				left: 20px;
+				bottom: 20px;
+				width: 140px;
+				height: 140px;
+				border-radius: 50%;
+				background: rgba(0, 0, 0, 0.18);
+				border: 1px solid rgba(255,255,255,0.35);
+				pointer-events: auto;
+			}
+
+			/* action buttons, bottom-right */
+			#action-buttons {
+				position: absolute;
+				right: 18px;
+				bottom: 18px;
+				display: flex;
+				flex-direction: row;
+				align-items: flex-end;
+				gap: 14px;
+				pointer-events: auto;
+			}
+
+			.action-btn {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 64px;
+				height: 64px;
+				border-radius: 50%;
+				border: 1px solid rgba(255,255,255,0.5);
+				background: rgba(20, 20, 20, 0.35);
+				color: #fff;
+				font-size: 11px;
+				font-weight: 600;
+				letter-spacing: 0.02em;
+				text-align: center;
+				line-height: 1.15;
+				-webkit-user-select: none;
+				user-select: none;
+				-webkit-tap-highlight-color: transparent;
+			}
+
+			.action-btn:active {
+				background: rgba(20, 20, 20, 0.6);
+				transform: scale(0.94);
+			}
+
+			#btn-place {
+				background: rgba(46, 160, 90, 0.4);
+			}
+
+			#btn-break {
+				background: rgba(200, 60, 50, 0.4);
+			}
+
+			#btn-jump {
+				width: 54px;
+				height: 54px;
+				align-self: center;
+				background: rgba(40, 100, 200, 0.4);
+			}
+
+			#mobile-hint {
+				position: absolute;
+				top: 8px;
+				left: 0;
+				width: 100%;
+				text-align: center;
+				color: rgba(0,0,0,0.55);
+				font-size: 11px;
+				pointer-events: none;
+			}
+		</style>
+	</head>
+	<body>
+
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - voxel painter - webgl<br>
+			<span id="desktop-hint"><strong>click</strong>: add voxel, <strong>shift + click</strong>: remove voxel</span>
+		</div>
+
+		<!-- Mobile touch UI overlay -->
+		<div id="mobile-ui">
+			<div id="mobile-hint">drag right side to look &middot; joystick to move</div>
+			<div id="crosshair"></div>
+			<div id="look-zone"></div>
+			<div id="joystick-zone"></div>
+			<div id="action-buttons">
+				<div class="action-btn" id="btn-break">BREAK</div>
+				<div class="action-btn" id="btn-jump">JUMP</div>
+				<div class="action-btn" id="btn-place">PLACE</div>
+			</div>
+		</div>
+
+		<!-- nipplejs for the virtual joystick -->
+		<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+
+			let camera, scene, renderer;
+			let plane;
+			let pointer, raycaster, isShiftDown = false;
+
+			let rollOverMesh, rollOverMaterial;
+			let cubeGeo, cubeMaterial;
+
+			const objects = [];
+
+			// ---------- Mobile state ----------
+
+			const isMobile = ( 'ontouchstart' in window ) || navigator.maxTouchPoints > 0;
+
+			let joystick = null;
+			let moveVector = { x: 0, y: 0 }; // x = strafe, y = forward
+			let moveForce = 0;
+
+			let yaw = 0;
+			let pitch = 0;
+			const PITCH_LIMIT = Math.PI / 2 - 0.05;
+
+			let lookTouchId = null;
+			let lastLookX = 0, lastLookY = 0;
+
+			let isJumping = false;
+			let jumpStart = 0;
+			const JUMP_DURATION = 420; // ms
+			const JUMP_HEIGHT = 90;
+			let baseCameraY = 0;
+
+			const clock = new THREE.Clock();
+			const MOVE_SPEED = 260; // units / second
+
+			init();
+			render();
+
+			function init() {
+
+				camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 10000 );
+
+				if ( isMobile ) {
+
+					// Start in a first-person eye-level position looking toward the grid.
+					baseCameraY = 260;
+					camera.position.set( 0, baseCameraY, 650 );
+					camera.rotation.order = 'YXZ';
+					yaw = 0;
+					pitch = -0.15;
+					camera.rotation.y = yaw;
+					camera.rotation.x = pitch;
+
+				} else {
+
+					camera.position.set( 500, 800, 1300 );
+					camera.lookAt( 0, 0, 0 );
+
+				}
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0xf0f0f0 );
+
+				// roll-over helpers
+
+				const rollOverGeo = new THREE.BoxGeometry( 50, 50, 50 );
+				rollOverMaterial = new THREE.MeshBasicMaterial( { color: 0xff0000, opacity: 0.5, transparent: true } );
+				rollOverMesh = new THREE.Mesh( rollOverGeo, rollOverMaterial );
+				scene.add( rollOverMesh );
+
+				// cubes
+
+				cubeGeo = new THREE.BoxGeometry( 50, 50, 50 );
+				cubeMaterial = new THREE.MeshLambertMaterial( { color: 0xfeb74c, map: new THREE.TextureLoader().load( 'textures/square-outline-textured.png' ) } );
+
+				// grid
+
+				const gridHelper = new THREE.GridHelper( 1000, 20 );
+				scene.add( gridHelper );
+
+				//
+
+				raycaster = new THREE.Raycaster();
+				pointer = new THREE.Vector2();
+
+				const geometry = new THREE.PlaneGeometry( 1000, 1000 );
+				geometry.rotateX( - Math.PI / 2 );
+
+				plane = new THREE.Mesh( geometry, new THREE.MeshBasicMaterial( { visible: false } ) );
+				scene.add( plane );
+
+				objects.push( plane );
+
+				// lights
+
+				const ambientLight = new THREE.AmbientLight( 0x606060 );
+				scene.add( ambientLight );
+
+				const directionalLight = new THREE.DirectionalLight( 0xffffff );
+				directionalLight.position.set( 1, 0.75, 0.5 ).normalize();
+				scene.add( directionalLight );
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				document.body.appendChild( renderer.domElement );
+
+				if ( isMobile ) {
+
+					document.getElementById( 'mobile-ui' ).classList.add( 'active' );
+					document.getElementById( 'desktop-hint' ).style.display = 'none';
+					initMobileControls();
+					renderer.setAnimationLoop( animate );
+
+				} else {
+
+					document.addEventListener( 'pointermove', onPointerMove );
+					document.addEventListener( 'pointerdown', onPointerDown );
+					document.addEventListener( 'keydown', onDocumentKeyDown );
+					document.addEventListener( 'keyup', onDocumentKeyUp );
+
+				}
+
+				//
+
+				window.addEventListener( 'resize', onWindowResize );
+
+			}
+
+			// ==========================================================
+			// Mobile controls: joystick movement + touch-drag look + buttons
+			// ==========================================================
+
+			function initMobileControls() {
+
+				// --- Joystick (nipplejs) for X/Z movement ---
+
+				const zone = document.getElementById( 'joystick-zone' );
+
+				joystick = nipplejs.create( {
+					zone: zone,
+					mode: 'static',
+					position: { left: '50%', top: '50%' },
+					color: 'white',
+					size: 110,
+					restOpacity: 0.9
+				} );
+
+				joystick.on( 'move', ( evt, data ) => {
+
+					if ( ! data.vector ) return;
+					moveVector.x = data.vector.x; // strafe
+					moveVector.y = data.vector.y; // forward/back
+					moveForce = Math.min( data.force || 1, 1.5 );
+
+				} );
+
+				joystick.on( 'end', () => {
+
+					moveVector.x = 0;
+					moveVector.y = 0;
+					moveForce = 0;
+
+				} );
+
+				// --- Right-side drag to look around (FPS camera) ---
+
+				const lookZone = document.getElementById( 'look-zone' );
+
+				lookZone.addEventListener( 'touchstart', ( event ) => {
+
+					const touch = event.changedTouches[ 0 ];
+					lookTouchId = touch.identifier;
+					lastLookX = touch.clientX;
+					lastLookY = touch.clientY;
+					event.preventDefault();
+
+				}, { passive: false } );
+
+				lookZone.addEventListener( 'touchmove', ( event ) => {
+
+					for ( const touch of event.changedTouches ) {
+
+						if ( touch.identifier !== lookTouchId ) continue;
+
+						const dx = touch.clientX - lastLookX;
+						const dy = touch.clientY - lastLookY;
+						lastLookX = touch.clientX;
+						lastLookY = touch.clientY;
+
+						const LOOK_SPEED = 0.0035;
+						yaw -= dx * LOOK_SPEED;
+						pitch -= dy * LOOK_SPEED;
+						pitch = Math.max( -PITCH_LIMIT, Math.min( PITCH_LIMIT, pitch ) );
+
+						camera.rotation.y = yaw;
+						camera.rotation.x = pitch;
+
+					}
+
+					event.preventDefault();
+
+				}, { passive: false } );
+
+				lookZone.addEventListener( 'touchend', ( event ) => {
+
+					for ( const touch of event.changedTouches ) {
+
+						if ( touch.identifier === lookTouchId ) lookTouchId = null;
+
+					}
+
+				} );
+
+				lookZone.addEventListener( 'touchcancel', () => {
+
+					lookTouchId = null;
+
+				} );
+
+				// --- Action buttons ---
+
+				const placeBtn = document.getElementById( 'btn-place' );
+				const breakBtn = document.getElementById( 'btn-break' );
+				const jumpBtn = document.getElementById( 'btn-jump' );
+
+				placeBtn.addEventListener( 'touchstart', ( event ) => {
+
+					event.preventDefault();
+					event.stopPropagation();
+					placeVoxelAtCrosshair();
+
+				}, { passive: false } );
+
+				breakBtn.addEventListener( 'touchstart', ( event ) => {
+
+					event.preventDefault();
+					event.stopPropagation();
+					breakVoxelAtCrosshair();
+
+				}, { passive: false } );
+
+				jumpBtn.addEventListener( 'touchstart', ( event ) => {
+
+					event.preventDefault();
+					event.stopPropagation();
+					doJump();
+
+				}, { passive: false } );
+
+			}
+
+			function updateCrosshairRaycast() {
+
+				// Raycast from the exact center of the screen (0,0 in NDC).
+				raycaster.setFromCamera( { x: 0, y: 0 }, camera );
+
+				const intersects = raycaster.intersectObjects( objects );
+
+				if ( intersects.length > 0 ) {
+
+					const intersect = intersects[ 0 ];
+
+					rollOverMesh.visible = true;
+					rollOverMesh.position.copy( intersect.point ).add( intersect.face.normal );
+					rollOverMesh.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
+
+					return intersect;
+
+				}
+
+				rollOverMesh.visible = false;
+				return null;
+
+			}
+
+			function placeVoxelAtCrosshair() {
+
+				const intersect = updateCrosshairRaycast();
+				if ( ! intersect ) return;
+
+				const voxel = new THREE.Mesh( cubeGeo, cubeMaterial );
+				voxel.position.copy( intersect.point ).add( intersect.face.normal );
+				voxel.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
+				scene.add( voxel );
+
+				objects.push( voxel );
+
+			}
+
+			function breakVoxelAtCrosshair() {
+
+				raycaster.setFromCamera( { x: 0, y: 0 }, camera );
+				const intersects = raycaster.intersectObjects( objects );
+
+				if ( intersects.length > 0 ) {
+
+					const intersect = intersects[ 0 ];
+
+					if ( intersect.object !== plane ) {
+
+						scene.remove( intersect.object );
+						objects.splice( objects.indexOf( intersect.object ), 1 );
+
+					}
+
+				}
+
+			}
+
+			function doJump() {
+
+				if ( isJumping ) return;
+				isJumping = true;
+				jumpStart = performance.now();
+
+			}
+
+			function updateJump() {
+
+				if ( ! isJumping ) return;
+
+				const t = ( performance.now() - jumpStart ) / JUMP_DURATION;
+
+				if ( t >= 1 ) {
+
+					isJumping = false;
+					camera.position.y = baseCameraY;
+					return;
+
+				}
+
+				// simple parabolic hop
+				const offset = Math.sin( t * Math.PI ) * JUMP_HEIGHT;
+				camera.position.y = baseCameraY + offset;
+
+			}
+
+			function updateMovement( delta ) {
+
+				if ( moveForce === 0 ) return;
+
+				const forward = new THREE.Vector3( 0, 0, -1 ).applyEuler( new THREE.Euler( 0, yaw, 0 ) );
+				const right = new THREE.Vector3( 1, 0, 0 ).applyEuler( new THREE.Euler( 0, yaw, 0 ) );
+
+				const speed = MOVE_SPEED * moveForce * delta;
+
+				camera.position.addScaledVector( forward, moveVector.y * speed );
+				camera.position.addScaledVector( right, moveVector.x * speed );
+
+			}
+
+			function animate() {
+
+				const delta = clock.getDelta();
+
+				updateMovement( delta );
+				updateJump();
+				updateCrosshairRaycast();
+
+				render();
+
+			}
+
+			// ==========================================================
+			// Desktop (unchanged core logic)
+			// ==========================================================
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				render();
+
+			}
+
+			function onPointerMove( event ) {
+
+				pointer.set( ( event.clientX / window.innerWidth ) * 2 - 1, - ( event.clientY / window.innerHeight ) * 2 + 1 );
+
+				raycaster.setFromCamera( pointer, camera );
+
+				const intersects = raycaster.intersectObjects( objects );
+
+				if ( intersects.length > 0 ) {
+
+					const intersect = intersects[ 0 ];
+
+					rollOverMesh.position.copy( intersect.point ).add( intersect.face.normal );
+					rollOverMesh.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
+
+				}
+
+				render();
+
+			}
+
+			function onPointerDown( event ) {
+
+				pointer.set( ( event.clientX / window.innerWidth ) * 2 - 1, - ( event.clientY / window.innerHeight ) * 2 + 1 );
+
+				raycaster.setFromCamera( pointer, camera );
+
+				const intersects = raycaster.intersectObjects( objects );
+
+				if ( intersects.length > 0 ) {
+
+					const intersect = intersects[ 0 ];
+
+					// delete cube
+
+					if ( isShiftDown ) {
+
+						if ( intersect.object !== plane ) {
+
+							scene.remove( intersect.object );
+
+							objects.splice( objects.indexOf( intersect.object ), 1 );
+
+						}
+
+					// create cube
+
+					} else {
+
+						const voxel = new THREE.Mesh( cubeGeo, cubeMaterial );
+						voxel.position.copy( intersect.point ).add( intersect.face.normal );
+						voxel.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
+						scene.add( voxel );
+
+						objects.push( voxel );
+
+					}
+
+					render();
+
+				}
+
+			}
+
+			function onDocumentKeyDown( event ) {
+
+				switch ( event.keyCode ) {
+
+					case 16: isShiftDown = true; break;
+
+				}
+
+			}
+
+			function onDocumentKeyUp( event ) {
+
+				switch ( event.keyCode ) {
+
+					case 16: isShiftDown = false; break;
+
+				}
+
+			}
+
+			function render() {
+
+				renderer.render( scene, camera );
+
+			}
+
+		</script>
+
+	</body>
+</html>
